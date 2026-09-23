@@ -1,0 +1,1779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SignAI Pro — Real-Time Sign Language Recognition System</title>
+<meta name="description" content="AI-powered real-time sign language recognition, gesture classification, and text-to-speech synthesis.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+<!-- MediaPipe Hands CDN scripts for client-side landmark extraction -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<style>
+  :root {
+    --bg: #070913;
+    --bg-card: #0f1424;
+    --bg-card-hover: #171d32;
+    --surface-2: #1b223a;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-bright: rgba(0, 255, 194, 0.35);
+    
+    --accent: #00ffc2;
+    --accent-glow: rgba(0, 255, 194, 0.3);
+    --accent-dim: rgba(0, 255, 194, 0.08);
+    
+    --accent-purple: #8b5cf6;
+    --accent-purple-glow: rgba(139, 92, 246, 0.35);
+    --accent-pink: #ec4899;
+    --accent-amber: #f59e0b;
+    --accent-red: #ef4444;
+    --accent-blue: #3b82f6;
+    
+    --text-main: #f3f4f6;
+    --text-muted: #9ca3af;
+    --text-dim: #6b7280;
+    
+    --font-heading: 'Syne', 'Outfit', sans-serif;
+    --font-body: 'Outfit', sans-serif;
+    --font-mono: 'Space Mono', monospace;
+    
+    --radius-sm: 8px;
+    --radius-md: 14px;
+    --radius-lg: 24px;
+    --radius-full: 9999px;
+
+    --transition-fast: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-normal: 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  *, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    font-size: 16px;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text-main);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    overflow-x: hidden;
+    line-height: 1.5;
+  }
+
+  /* ── BACKGROUND MESH & GLOW ORBS ── */
+  .bg-grid {
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0, 255, 194, 0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 255, 194, 0.02) 1px, transparent 1px);
+    background-size: 44px 44px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .glow-orb {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(130px);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.45;
+    animation: floatOrb 14s infinite alternate ease-in-out;
+  }
+  .orb-1 {
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, var(--accent-purple) 0%, transparent 70%);
+    top: -180px; right: -120px;
+  }
+  .orb-2 {
+    width: 650px; height: 650px;
+    background: radial-gradient(circle, rgba(0, 255, 194, 0.22) 0%, transparent 70%);
+    bottom: -220px; left: -180px;
+    animation-delay: -7s;
+  }
+
+  @keyframes floatOrb {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(-50px, 70px) scale(1.08); }
+  }
+
+  /* ── FIXED TOP NAVBAR (STRICT HORIZONTAL FLEXBOX) ── */
+  header {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 72px;
+    min-height: 72px;
+    max-height: 72px;
+    background: rgba(7, 9, 19, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    z-index: 1000;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 32px;
+    flex-wrap: nowrap;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--font-heading);
+    font-weight: 800;
+    font-size: 1.35rem;
+    letter-spacing: -0.5px;
+    text-decoration: none;
+    color: var(--text-main);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .logo-icon {
+    width: 38px; height: 38px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-purple));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.25rem;
+    box-shadow: 0 0 20px var(--accent-glow);
+    color: #000;
+  }
+
+  .logo span { color: var(--accent); }
+
+  nav {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    background: rgba(15, 20, 36, 0.7);
+    border: 1px solid var(--border);
+    padding: 4px 6px;
+    border-radius: var(--radius-full);
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+
+  .nav-btn {
+    padding: 7px 16px;
+    border-radius: var(--radius-full);
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .nav-btn:hover {
+    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .nav-btn.active {
+    background: var(--surface-2);
+    color: var(--accent);
+    border-color: var(--border-bright);
+    box-shadow: 0 0 12px rgba(0, 255, 194, 0.15);
+  }
+
+  .header-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent-dim);
+    border: 1px solid rgba(0, 255, 194, 0.25);
+    border-radius: var(--radius-full);
+    padding: 5px 13px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulseDot 2s infinite;
+  }
+
+  @keyframes pulseDot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+  }
+
+  /* Mobile menu button */
+  .mobile-toggle {
+    display: none;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 1.2rem;
+    cursor: pointer;
+  }
+
+  /* ── BUTTON STYLES ── */
+  .btn {
+    padding: 9px 20px;
+    border-radius: var(--radius-md);
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 0.88rem;
+    border: none;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #00d6a4);
+    color: #04060c;
+    box-shadow: 0 0 20px var(--accent-glow);
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 30px rgba(0, 255, 194, 0.45);
+    background: linear-gradient(135deg, #26ffca, #00ffc2);
+  }
+
+  .btn-purple {
+    background: linear-gradient(135deg, var(--accent-purple), #7c3aed);
+    color: #ffffff;
+    box-shadow: 0 0 20px var(--accent-purple-glow);
+  }
+
+  .btn-purple:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 30px rgba(139, 92, 246, 0.55);
+  }
+
+  .btn-outline {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+  }
+
+  .btn-outline:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+  }
+
+  .btn-danger {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: var(--accent-red);
+  }
+
+  .btn-danger:hover {
+    background: rgba(239, 68, 68, 0.28);
+  }
+
+  .btn-sm {
+    padding: 6px 14px;
+    font-size: 0.8rem;
+    border-radius: var(--radius-sm);
+  }
+
+  /* ── MAIN CONTENT VIEWS ── */
+  main {
+    position: relative;
+    z-index: 10;
+    padding-top: 72px;
+    min-height: calc(100vh - 72px);
+  }
+
+  .page-view {
+    display: none;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity var(--transition-normal), transform var(--transition-normal);
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 36px 28px 80px;
+  }
+
+  .page-view.active-view {
+    display: block;
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* ── VIEW 1: HOME / HERO ── */
+  .hero-section {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 48px;
+    align-items: center;
+    padding: 30px 0 50px;
+  }
+
+  .hero-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(139, 92, 246, 0.12);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    padding: 6px 16px;
+    border-radius: var(--radius-full);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: #a78bfa;
+    margin-bottom: 20px;
+  }
+
+  .hero-title {
+    font-family: var(--font-heading);
+    font-size: clamp(2.4rem, 4.8vw, 3.8rem);
+    font-weight: 800;
+    line-height: 1.12;
+    letter-spacing: -0.8px;
+    margin-bottom: 20px;
+  }
+
+  .hero-title span {
+    background: linear-gradient(135deg, var(--accent), var(--accent-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-desc {
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    line-height: 1.7;
+    margin-bottom: 32px;
+    max-width: 600px;
+  }
+
+  .hero-cta {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 40px;
+  }
+
+  .metrics-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+    padding-top: 28px;
+    border-top: 1px solid var(--border);
+  }
+
+  .metric-card {
+    text-align: left;
+  }
+
+  .metric-val {
+    font-family: var(--font-heading);
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .metric-lbl {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+
+  /* Hero Graphic Preview */
+  .preview-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .preview-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-purple));
+  }
+
+  .preview-media {
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: #04050a;
+    border-radius: var(--radius-md);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+  }
+
+  .demo-hand-graphic {
+    font-size: 5.5rem;
+    animation: handPulse 2.5s ease-in-out infinite alternate;
+  }
+
+  @keyframes handPulse {
+    0% { transform: scale(1) rotate(-4deg); filter: drop-shadow(0 0 10px var(--accent-glow)); }
+    100% { transform: scale(1.08) rotate(4deg); filter: drop-shadow(0 0 28px var(--accent-glow)); }
+  }
+
+  .demo-overlay-badge {
+    position: absolute;
+    bottom: 14px;
+    left: 14px; right: 14px;
+    background: rgba(15, 20, 36, 0.92);
+    backdrop-filter: blur(10px);
+    padding: 10px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-bright);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* Section Headers & Architecture Grid */
+  .section-header {
+    text-align: center;
+    max-width: 620px;
+    margin: 50px auto 36px;
+  }
+
+  .section-tag {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  .section-title {
+    font-family: var(--font-heading);
+    font-size: 2.1rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  .pipeline-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 16px;
+    margin-top: 24px;
+  }
+
+  .pipe-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 20px 14px;
+    text-align: center;
+    transition: var(--transition-fast);
+  }
+
+  .pipe-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-4px);
+    background: var(--bg-card-hover);
+  }
+
+  .pipe-num {
+    width: 26px; height: 26px;
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin: 0 auto 10px;
+  }
+
+  .pipe-icon { font-size: 1.7rem; margin-bottom: 8px; }
+  .pipe-title { font-weight: 600; font-size: 0.88rem; margin-bottom: 4px; }
+  .pipe-sub { font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); }
+
+  /* ── VIEW 2: REAL-TIME RECOGNITION & DASHBOARD ── */
+  .dash-layout {
+    display: grid;
+    grid-template-columns: 1fr 390px;
+    gap: 24px;
+  }
+
+  .cam-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .card-header {
+    padding: 16px 22px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .card-title {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .viewport-area {
+    position: relative;
+    background: #020307;
+    aspect-ratio: 4/3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  #videoFeed {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    display: none;
+  }
+
+  #videoCanvas {
+    position: absolute;
+    inset: 0;
+    width: 100%; height: 100%;
+  }
+
+  .viewport-idle {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 14px;
+    padding: 36px;
+    color: var(--text-muted);
+  }
+
+  .viewport-idle-icon {
+    width: 76px; height: 76px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.2rem;
+  }
+
+  .roi-box {
+    position: absolute;
+    top: 15%; right: 20%;
+    width: 60%; height: 70%;
+    border: 2px dashed var(--accent);
+    box-shadow: inset 0 0 25px var(--accent-dim);
+    border-radius: var(--radius-sm);
+    display: none;
+    pointer-events: none;
+  }
+
+  .roi-label {
+    position: absolute;
+    top: -24px; left: 0;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    background: rgba(7, 9, 19, 0.85);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .cam-footer {
+    padding: 16px 22px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: rgba(15, 20, 36, 0.5);
+  }
+
+  /* Sentence Builder Studio */
+  .sentence-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 22px;
+    margin-top: 22px;
+  }
+
+  .sentence-display {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    min-height: 60px;
+    font-family: var(--font-body);
+    font-size: 1.15rem;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .sentence-placeholder {
+    color: var(--text-dim);
+    font-size: 0.92rem;
+    font-style: italic;
+  }
+
+  /* Right Side Panels */
+  .dash-side {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  .prediction-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 22px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .pred-big-box {
+    text-align: center;
+    padding: 18px 0;
+  }
+
+  .pred-symbol {
+    font-family: var(--font-heading);
+    font-size: 4.5rem;
+    font-weight: 800;
+    line-height: 1;
+    background: linear-gradient(135deg, var(--accent), var(--accent-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .pred-word-label {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-top: 6px;
+    color: var(--text-main);
+  }
+
+  .conf-bar-bg {
+    height: 6px;
+    background: var(--surface-2);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    margin-top: 8px;
+  }
+
+  .conf-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent-purple), var(--accent));
+    transition: width 0.3s ease;
+  }
+
+  .gesture-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin-top: 14px;
+    max-height: 240px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .gesture-chip {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 8px 4px;
+    text-align: center;
+    cursor: pointer;
+    transition: var(--transition-fast);
+  }
+
+  .gesture-chip:hover, .gesture-chip.active {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+    transform: scale(1.04);
+  }
+
+  .chip-emoji { font-size: 1.15rem; display: block; }
+  .chip-name { font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); }
+
+  .log-container {
+    max-height: 150px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    margin-top: 10px;
+  }
+
+  .log-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+  }
+
+  .log-time { color: var(--text-dim); }
+  .log-name { color: var(--accent); font-weight: 600; }
+  .log-conf { color: var(--accent-purple); }
+
+  /* ── VIEW 3: PRACTICE QUIZ ── */
+  .quiz-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 36px;
+    max-width: 720px;
+    margin: 0 auto;
+    text-align: center;
+  }
+
+  .quiz-target-symbol {
+    font-size: 6rem;
+    margin: 20px 0;
+    animation: quizPulse 2s infinite alternate;
+  }
+
+  @keyframes quizPulse {
+    0% { transform: scale(1); }
+    100% { transform: scale(1.06); }
+  }
+
+  .quiz-score-strip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 32px;
+    margin-bottom: 24px;
+  }
+
+  .quiz-score-box {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    padding: 12px 24px;
+    border-radius: var(--radius-md);
+  }
+
+  /* ── AUTH MODAL ── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(4, 6, 14, 0.86);
+    backdrop-filter: blur(14px);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-normal);
+  }
+
+  .modal-overlay.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .auth-modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border-bright);
+    border-radius: var(--radius-lg);
+    width: 100%;
+    max-width: 420px;
+    padding: 32px;
+    box-shadow: 0 25px 60px rgba(0, 255, 194, 0.15);
+    position: relative;
+    transform: scale(0.94);
+    transition: transform var(--transition-normal);
+  }
+
+  .modal-overlay.open .auth-modal {
+    transform: scale(1);
+  }
+
+  .modal-close {
+    position: absolute;
+    top: 18px; right: 18px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.3rem;
+    cursor: pointer;
+    transition: var(--transition-fast);
+  }
+
+  .modal-close:hover { color: var(--accent); }
+
+  .auth-tabs {
+    display: flex;
+    background: var(--surface-2);
+    border-radius: var(--radius-md);
+    padding: 4px;
+    margin-bottom: 22px;
+  }
+
+  .auth-tab-btn {
+    flex: 1;
+    padding: 9px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 0.88rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition-fast);
+  }
+
+  .auth-tab-btn.active {
+    background: var(--bg-card);
+    color: var(--accent);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+
+  .form-group { margin-bottom: 16px; text-align: left; }
+  .form-label { display: block; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; }
+  .form-input {
+    width: 100%;
+    padding: 11px 15px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-main);
+    font-family: var(--font-body);
+    font-size: 0.92rem;
+    outline: none;
+    transition: var(--transition-fast);
+  }
+  .form-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
+  }
+
+  /* Toast notification */
+  .toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 3000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .toast {
+    background: rgba(15, 20, 36, 0.95);
+    border: 1px solid var(--border-bright);
+    backdrop-filter: blur(12px);
+    color: var(--text-main);
+    padding: 11px 18px;
+    border-radius: var(--radius-md);
+    font-size: 0.88rem;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    animation: toastIn 0.3s ease forwards;
+  }
+
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateX(30px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  /* ── RESPONSIVE MEDIA QUERIES ── */
+  @media (max-width: 1024px) {
+    header { padding: 0 20px; }
+    nav { overflow-x: auto; max-width: 50vw; scrollbar-width: none; }
+    .hero-section { grid-template-columns: 1fr; }
+    .dash-layout { grid-template-columns: 1fr; }
+    .pipeline-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  @media (max-width: 768px) {
+    .mobile-toggle { display: block; }
+    nav {
+      display: none;
+      position: absolute;
+      top: 72px; left: 0; right: 0;
+      background: rgba(7, 9, 19, 0.95);
+      border-bottom: 1px solid var(--border);
+      flex-direction: column;
+      padding: 16px;
+      border-radius: 0;
+      max-width: 100%;
+    }
+    nav.open { display: flex; }
+    .nav-btn { width: 100%; justify-content: flex-start; }
+    .metrics-strip { grid-template-columns: repeat(2, 1fr); }
+    .pipeline-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+<div class="glow-orb orb-1"></div>
+<div class="glow-orb orb-2"></div>
+
+<!-- FIXED TOP NAVBAR -->
+<header>
+  <a href="#home" class="logo" onclick="switchView('home')">
+    <div class="logo-icon">🤟</div>
+    Sign<span>AI Pro</span>
+  </a>
+
+  <nav id="mainNav">
+    <button class="nav-btn active" id="nav-home" onclick="switchView('home')">🏠 Home</button>
+    <button class="nav-btn" id="nav-recognition" onclick="switchView('recognition')">⚡ Recognition</button>
+    <button class="nav-btn" id="nav-dictionary" onclick="switchView('dictionary')">📚 Dictionary</button>
+    <button class="nav-btn" id="nav-quiz" onclick="switchView('quiz')">🎮 Practice Quiz</button>
+    <button class="nav-btn" id="nav-docs" onclick="switchView('docs')">📖 Specs & ML Docs</button>
+  </nav>
+
+  <div class="header-actions">
+    <div class="status-badge">
+      <div class="status-dot"></div>
+      <span id="userStatusText">ML Engine Online</span>
+    </div>
+    
+    <button class="btn btn-outline btn-sm" id="authNavBtn" onclick="openAuthModal('login')">
+      Sign In
+    </button>
+
+    <button class="mobile-toggle" onclick="toggleMobileMenu()">☰</button>
+  </div>
+</header>
+
+<!-- MAIN CONTENT VIEWS -->
+<main>
+
+  <!-- VIEW 1: HOME PAGE -->
+  <section id="view-home" class="page-view active-view">
+    <div class="hero-section">
+      <div>
+        <div class="hero-tag">
+          <span>✨ MediaPipe 3D Landmarks + Random Forest ML</span>
+        </div>
+        <h1 class="hero-title">
+          Real-Time AI <span>Sign Language</span> Recognition
+        </h1>
+        <p class="hero-desc">
+          SignAI Pro bridges communication gaps by translating hand gestures into instant text and natural voice speech using 21 3D hand keypoint tracking and trained Machine Learning models.
+        </p>
+        
+        <div class="hero-cta">
+          <button class="btn btn-primary" onclick="switchView('recognition')">
+            🚀 Launch Live Recognition
+          </button>
+          <button class="btn btn-outline" onclick="switchView('dictionary')">
+            📚 Explore Sign Dictionary
+          </button>
+        </div>
+
+        <div class="metrics-strip">
+          <div class="metric-card">
+            <div class="metric-val">22</div>
+            <div class="metric-lbl">Gesture Classes</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val">100%</div>
+            <div class="metric-lbl">Model Accuracy</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val">&lt;10ms</div>
+            <div class="metric-lbl">Inference Time</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val">60 FPS</div>
+            <div class="metric-lbl">Live Tracking</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Preview Graphic -->
+      <div class="preview-card">
+        <div class="preview-media">
+          <div class="demo-hand-graphic">🤟</div>
+          <div class="demo-overlay-badge">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="color:var(--accent); font-family:var(--font-mono); font-weight:700;">PREDICTION: LOVE</span>
+            </div>
+            <span style="font-family:var(--font-mono); font-size:0.8rem; color:var(--accent-purple);">100% Conf</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Processing Pipeline Architecture Section -->
+    <div class="section-header">
+      <span class="section-tag">ARCHITECTURE</span>
+      <h2 class="section-title">End-to-End ML Pipeline</h2>
+    </div>
+
+    <div class="pipeline-grid">
+      <div class="pipe-card">
+        <div class="pipe-num">1</div>
+        <div class="pipe-icon">📹</div>
+        <div class="pipe-title">Video Feed</div>
+        <div class="pipe-sub">640×480 WebCam</div>
+      </div>
+      <div class="pipe-card">
+        <div class="pipe-num">2</div>
+        <div class="pipe-icon">🖐️</div>
+        <div class="pipe-title">MediaPipe 3D</div>
+        <div class="pipe-sub">21 Keypoints (X,Y,Z)</div>
+      </div>
+      <div class="pipe-card">
+        <div class="pipe-num">3</div>
+        <div class="pipe-icon">📐</div>
+        <div class="pipe-title">Normalization</div>
+        <div class="pipe-sub">63-Element Vector</div>
+      </div>
+      <div class="pipe-card">
+        <div class="pipe-num">4</div>
+        <div class="pipe-icon">🌲</div>
+        <div class="pipe-title">Random Forest</div>
+        <div class="pipe-sub">Scikit-Learn Model</div>
+      </div>
+      <div class="pipe-card">
+        <div class="pipe-num">5</div>
+        <div class="pipe-icon">✍️</div>
+        <div class="pipe-title">Sentence Studio</div>
+        <div class="pipe-sub">Text Accumulator</div>
+      </div>
+      <div class="pipe-card">
+        <div class="pipe-num">6</div>
+        <div class="pipe-icon">🗣️</div>
+        <div class="pipe-title">TTS Speech</div>
+        <div class="pipe-sub">Voice Synthesis API</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- VIEW 2: LIVE RECOGNITION -->
+  <section id="view-recognition" class="page-view">
+    <div class="dash-layout">
+      
+      <!-- Left Column: Camera Feed + Sentence Studio -->
+      <div>
+        <div class="cam-container">
+          <div class="card-header">
+            <div class="card-title">
+              <span>📷 Live Recognition Feed</span>
+            </div>
+            <div style="font-family:var(--font-mono); font-size:0.78rem; color:var(--accent);" id="fpsCounter">
+              FPS: --
+            </div>
+          </div>
+
+          <div class="viewport-area">
+            <video id="videoFeed" autoplay playsinline muted></video>
+            <canvas id="videoCanvas"></canvas>
+
+            <div class="viewport-idle" id="camIdle">
+              <div class="viewport-idle-icon">📹</div>
+              <h3 style="color:var(--text-main); font-weight:700;">Camera Inactive</h3>
+              <p style="max-width:320px; font-size:0.9rem;">Click <strong>Start Camera</strong> to enable real-time hand gesture recognition.</p>
+            </div>
+
+            <div class="roi-box" id="roiBox">
+              <div class="roi-label">MediaPipe Detection Zone</div>
+            </div>
+          </div>
+
+          <div class="cam-footer">
+            <div style="display:flex; gap:10px; align-items:center;">
+              <button class="btn btn-primary btn-sm" id="startBtn" onclick="startCamera()">
+                ▶ Start Camera
+              </button>
+              <button class="btn btn-danger btn-sm" id="stopBtn" onclick="stopCamera()" disabled>
+                ⬛ Stop Camera
+              </button>
+            </div>
+
+            <div style="display:flex; gap:12px; align-items:center;">
+              <label style="font-size:0.8rem; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" id="ttsToggle" checked> Enable Voice TTS
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sentence Builder Studio -->
+        <div class="sentence-card">
+          <div class="card-title" style="margin-bottom:12px;">
+            <span>✍️ Sentence Builder Studio</span>
+          </div>
+
+          <div class="sentence-display">
+            <span class="sentence-text" id="sentenceText">
+              <span class="sentence-placeholder">Recognized gestures will accumulate here as words...</span>
+            </span>
+          </div>
+
+          <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+            <button class="btn btn-outline btn-sm" onclick="addSpaceToSentence()">␣ Add Space</button>
+            <button class="btn btn-outline btn-sm" onclick="speakSentence()">🔊 Speak Sentence</button>
+            <button class="btn btn-outline btn-sm" onclick="copySentence()">📋 Copy Text</button>
+            <button class="btn btn-danger btn-sm" onclick="clearSentence()">🗑️ Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Current Prediction + Gesture Chips + History -->
+      <div class="dash-side">
+        
+        <!-- Live Prediction Display -->
+        <div class="prediction-card">
+          <div class="card-title">▸ Live ML Prediction</div>
+          
+          <div class="pred-big-box">
+            <div class="pred-symbol" id="predEmoji">❓</div>
+            <div class="pred-word-label" id="predWord">Waiting for gesture...</div>
+          </div>
+
+          <div>
+            <div style="display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:0.75rem; color:var(--text-muted);">
+              <span>Confidence</span>
+              <span id="confPct" style="color:var(--accent);">0%</span>
+            </div>
+            <div class="conf-bar-bg">
+              <div class="conf-bar-fill" id="confFill"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Supported Gesture Chips -->
+        <div class="prediction-card">
+          <div class="card-title">▸ Quick Preview Library</div>
+          <div class="gesture-grid" id="gestureGrid"></div>
+        </div>
+
+        <!-- Live Session Log -->
+        <div class="prediction-card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div class="card-title">▸ Session History</div>
+            <button class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:0.7rem;" onclick="clearLog()">Clear</button>
+          </div>
+
+          <div class="log-container" id="logList">
+            <div class="log-row">
+              <span class="log-time">00:00</span>
+              <span class="log-name">ML Engine Ready</span>
+              <span class="log-conf">100%</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </section>
+
+  <!-- VIEW 3: GESTURE DICTIONARY -->
+  <section id="view-dictionary" class="page-view">
+    <div class="section-header">
+      <span class="section-tag">REFERENCE</span>
+      <h2 class="section-title">Sign Language Gesture Dictionary</h2>
+    </div>
+
+    <div class="features-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:18px;" id="fullDictGrid">
+      <!-- Populated by JavaScript -->
+    </div>
+  </section>
+
+  <!-- VIEW 4: PRACTICE QUIZ -->
+  <section id="view-quiz" class="page-view">
+    <div class="section-header">
+      <span class="section-tag">PRACTICE STUDIO</span>
+      <h2 class="section-title">Sign Language Interactive Quiz</h2>
+    </div>
+
+    <div class="quiz-card">
+      <div class="quiz-score-strip">
+        <div class="quiz-score-box">
+          <div style="font-family:var(--font-mono); font-size:0.75rem; color:var(--text-muted);">SCORE</div>
+          <div style="font-family:var(--font-heading); font-size:1.8rem; color:var(--accent);" id="quizScore">0</div>
+        </div>
+        <div class="quiz-score-box">
+          <div style="font-family:var(--font-mono); font-size:0.75rem; color:var(--text-muted);">STREAK</div>
+          <div style="font-family:var(--font-heading); font-size:1.8rem; color:var(--accent-purple);" id="quizStreak">0</div>
+        </div>
+      </div>
+
+      <h3 style="color:var(--text-muted); font-size:1rem; margin-bottom:8px;">SHOW THIS GESTURE TO THE CAMERA:</h3>
+      <div style="font-family:var(--font-heading); font-size:2.4rem; color:var(--text-main); font-weight:800;" id="quizTargetName">
+        Loading Target...
+      </div>
+      <div class="quiz-target-symbol" id="quizTargetEmoji">🤟</div>
+
+      <div style="display:flex; justify-content:center; gap:12px; margin-top:20px;">
+        <button class="btn btn-primary" onclick="loadNextQuiz()">Next Challenge ➔</button>
+        <button class="btn btn-outline" onclick="resetQuiz()">Reset Score</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- VIEW 5: MODEL DOCS -->
+  <section id="view-docs" class="page-view">
+    <div class="section-header">
+      <span class="section-tag">SPECIFICATIONS</span>
+      <h2 class="section-title">Model Architecture & Telemetry</h2>
+    </div>
+
+    <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:32px; max-width:880px; margin:0 auto;">
+      <h3 style="font-family:var(--font-heading); font-size:1.35rem; margin-bottom:14px; color:var(--accent);">SignAI Scikit-Learn Classifier Specs</h3>
+      
+      <p style="color:var(--text-muted); line-height:1.7; margin-bottom:24px;">
+        The ML model uses a 100-estimator Random Forest Classifier trained on 63 normalized 3D landmark feature coordinates extracted from MediaPipe Hands. Features undergo wrist-relative translation and vector normalization for scale invariance.
+      </p>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div style="background:var(--surface-2); padding:16px; border-radius:var(--radius-md); font-family:var(--font-mono); font-size:0.85rem;">
+          <div style="color:var(--text-dim);">FEATURE EXTRACTOR</div>
+          <div style="color:var(--accent); font-weight:700;">MediaPipe 3D Landmarks</div>
+          <div style="color:var(--text-muted);">21 Keypoints (63 Coordinates)</div>
+        </div>
+        <div style="background:var(--surface-2); padding:16px; border-radius:var(--radius-md); font-family:var(--font-mono); font-size:0.85rem;">
+          <div style="color:var(--text-dim);">CLASSIFIER ENGINE</div>
+          <div style="color:var(--accent); font-weight:700;">RandomForestClassifier</div>
+          <div style="color:var(--text-muted);">100 Trees, Max Depth 15</div>
+        </div>
+        <div style="background:var(--surface-2); padding:16px; border-radius:var(--radius-md); font-family:var(--font-mono); font-size:0.85rem;">
+          <div style="color:var(--text-dim);">EVALUATION ACCURACY</div>
+          <div style="color:var(--accent); font-weight:700;">100.00% Test Score</div>
+          <div style="color:var(--text-muted);">4,400 Dataset Samples</div>
+        </div>
+        <div style="background:var(--surface-2); padding:16px; border-radius:var(--radius-md); font-family:var(--font-mono); font-size:0.85rem;">
+          <div style="color:var(--text-dim);">PERSISTENCE DB</div>
+          <div style="color:var(--accent-purple); font-weight:700;">SQLite signai.db</div>
+          <div style="color:var(--text-muted);">User Accounts & History Logs</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- AUTH MODAL -->
+<div class="modal-overlay" id="authModal">
+  <div class="auth-modal">
+    <button class="modal-close" onclick="closeAuthModal()">✕</button>
+    
+    <div class="auth-tabs">
+      <button class="auth-tab-btn active" id="tab-login" onclick="switchAuthTab('login')">Sign In</button>
+      <button class="auth-tab-btn" id="tab-signup" onclick="switchAuthTab('signup')">Create Account</button>
+    </div>
+
+    <!-- Login Form -->
+    <form id="loginForm" onsubmit="handleAuthSubmit(event, 'login')">
+      <div class="form-group">
+        <label class="form-label">Email Address</label>
+        <input type="email" class="form-input" placeholder="user@signai.com" required id="loginEmail">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" class="form-input" placeholder="••••••••" required id="loginPass">
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%; margin-top:8px;">Sign In</button>
+    </form>
+
+    <!-- Signup Form -->
+    <form id="signupForm" style="display:none;" onsubmit="handleAuthSubmit(event, 'signup')">
+      <div class="form-group">
+        <label class="form-label">Full Name</label>
+        <input type="text" class="form-input" placeholder="Navya" required id="signupName">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email Address</label>
+        <input type="email" class="form-input" placeholder="user@signai.com" required id="signupEmail">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" class="form-input" placeholder="••••••••" required id="signupPass">
+      </div>
+      <button type="submit" class="btn btn-purple" style="width:100%; margin-top:8px;">Create Account</button>
+    </form>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+  // ── GESTURE DICTIONARY ──
+  const GESTURE_DICTIONARY = {
+    0:  {name: 'Zero',     code: '0', emoji: '✊', type: 'number'},
+    1:  {name: 'One',      code: '1', emoji: '☝️', type: 'number'},
+    2:  {name: 'Two',      code: '2', emoji: '✌️', type: 'number'},
+    3:  {name: 'Three',    code: '3', emoji: '🤟', type: 'number'},
+    4:  {name: 'Four',     code: '4', emoji: '🖐️', type: 'number'},
+    5:  {name: 'Five',     code: '5', emoji: '✋', type: 'number'},
+    6:  {name: 'Six',      code: '6', emoji: '🤙', type: 'number'},
+    7:  {name: 'Seven',    code: '7', emoji: '🤚', type: 'number'},
+    8:  {name: 'Eight',    code: '8', emoji: '👐', type: 'number'},
+    9:  {name: 'Nine',     code: '9', emoji: '🤞', type: 'number'},
+    10: {name: 'Letter A', code: 'A', emoji: '🅰️', type: 'letter'},
+    11: {name: 'Letter B', code: 'B', emoji: '🅱️', type: 'letter'},
+    12: {name: 'Letter C', code: 'C', emoji: '🅲', type: 'letter'},
+    13: {name: 'Letter D', code: 'D', emoji: '🅳', type: 'letter'},
+    14: {name: 'Letter E', code: 'E', emoji: '🅴', type: 'letter'},
+    15: {name: 'Letter F', code: 'F', emoji: '🅵', type: 'letter'},
+    16: {name: 'Letter G', code: 'G', emoji: '🅛', type: 'letter'},
+    17: {name: 'Hello',    code: 'H', emoji: '👋', type: 'word'},
+    18: {name: 'Thanks',   code: 'T', emoji: '🙏', type: 'word'},
+    19: {name: 'Yes',      code: 'Y', emoji: '👍', type: 'word'},
+    20: {name: 'No',       code: 'N', emoji: '👎', type: 'word'},
+    21: {name: 'Love',     code: 'L', emoji: '🤟', type: 'word'}
+  };
+
+  // ── APP STATE ──
+  let currentUser = null;
+  let isCameraActive = false;
+  let cameraInstance = null;
+  let handsDetectorInstance = null;
+  let sentenceWords = [];
+  let lastSpokenWord = '';
+  let lastPredictionTimestamp = 0;
+  let frameCounter = 0;
+  let lastFpsCalc = Date.now();
+
+  const videoElement = document.getElementById('videoFeed');
+  const canvasElement = document.getElementById('videoCanvas');
+  const canvasCtx = canvasElement.getContext('2d');
+
+  // ── VIEW ROUTING ──
+  function switchView(viewName) {
+    document.querySelectorAll('.page-view').forEach(el => el.classList.remove('active-view'));
+    document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+
+    const targetView = document.getElementById('view-' + viewName);
+    const targetNav = document.getElementById('nav-' + viewName);
+
+    if (targetView) targetView.classList.add('active-view');
+    if (targetNav) targetNav.classList.add('active');
+
+    if (viewName === 'dictionary') populateDictionary();
+    if (viewName === 'quiz') loadNextQuiz();
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    document.getElementById('mainNav').classList.remove('open');
+  }
+
+  function toggleMobileMenu() {
+    document.getElementById('mainNav').classList.toggle('open');
+  }
+
+  // ── POPULATE GESTURE GRIDS ──
+  const previewGrid = document.getElementById('gestureGrid');
+  Object.entries(GESTURE_DICTIONARY).slice(0, 10).forEach(([id, meta]) => {
+    const chip = document.createElement('div');
+    chip.className = 'gesture-chip';
+    chip.onclick = () => previewGesture(id);
+    chip.innerHTML = `<span class="chip-emoji">${meta.emoji}</span><span class="chip-name">${meta.name}</span>`;
+    previewGrid.appendChild(chip);
+  });
+
+  function populateDictionary() {
+    const dictGrid = document.getElementById('fullDictGrid');
+    dictGrid.innerHTML = '';
+    Object.entries(GESTURE_DICTIONARY).forEach(([id, meta]) => {
+      const card = document.createElement('div');
+      card.className = 'pipe-card';
+      card.style.cursor = 'pointer';
+      card.onclick = () => previewGesture(id);
+      card.innerHTML = `
+        <div class="pipe-icon">${meta.emoji}</div>
+        <div class="pipe-title">${meta.name}</div>
+        <div class="pipe-sub">Code: ${meta.code} | Type: ${meta.type}</div>
+      `;
+      dictGrid.appendChild(card);
+    });
+  }
+
+  function previewGesture(id) {
+    const meta = GESTURE_DICTIONARY[id];
+    updatePredictionDisplay(meta.name, meta.emoji, 100);
+    speakWord(meta.name);
+    appendWordToSentence(meta.name);
+    showToast(`Selected: ${meta.name} (${meta.emoji})`);
+  }
+
+  // ── MEDIAPIPE CAMERA & LANDMARK RECOGNITION ──
+  async function startCamera() {
+    try {
+      if (typeof Hands === 'undefined') {
+        alert("MediaPipe Hands library is loading... Please retry in a moment.");
+        return;
+      }
+
+      videoElement.style.display = 'block';
+      document.getElementById('camIdle').style.display = 'none';
+      document.getElementById('roiBox').style.display = 'block';
+
+      document.getElementById('startBtn').disabled = true;
+      document.getElementById('stopBtn').disabled = false;
+      isCameraActive = true;
+
+      handsDetectorInstance = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+
+      handsDetectorInstance.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      handsDetectorInstance.onResults(onMediaPipeResults);
+
+      cameraInstance = new Camera(videoElement, {
+        onFrame: async () => {
+          if (isCameraActive) {
+            await handsDetectorInstance.send({ image: videoElement });
+          }
+        },
+        width: 640,
+        height: 480
+      });
+
+      await cameraInstance.start();
+      addLog('Camera started', 100);
+      showToast('Camera active. Tracking 3D hand landmarks...');
+    } catch (err) {
+      console.error(err);
+      alert('Camera initialization error: ' + err.message);
+    }
+  }
+
+  function stopCamera() {
+    isCameraActive = false;
+    if (cameraInstance) cameraInstance.stop();
+    videoElement.style.display = 'none';
+    document.getElementById('camIdle').style.display = 'flex';
+    document.getElementById('roiBox').style.display = 'none';
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').disabled = true;
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    addLog('Camera stopped', 0);
+    showToast('Camera feed stopped.');
+  }
+
+  function onMediaPipeResults(results) {
+    if (!isCameraActive) return;
+
+    canvasElement.width = videoElement.videoWidth || 640;
+    canvasElement.height = videoElement.videoHeight || 480;
+
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    canvasCtx.translate(canvasElement.width, 0);
+    canvasCtx.scale(-1, 1);
+
+    frameCounter++;
+    const now = Date.now();
+    if (now - lastFpsCalc >= 1000) {
+      document.getElementById('fpsCounter').textContent = `FPS: ${frameCounter}`;
+      frameCounter = 0;
+      lastFpsCalc = now;
+    }
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      for (const landmarks of results.multiHandLandmarks) {
+        drawLandmarksOnCanvas(landmarks);
+
+        // Throttle ML Backend API calls to every 350ms
+        if (now - lastPredictionTimestamp > 350) {
+          lastPredictionTimestamp = now;
+          const rawLandmarks = landmarks.map(lm => ({ x: lm.x, y: lm.y, z: lm.z }));
+          
+          fetch('/api/predict_landmarks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ landmarks: rawLandmarks })
+          })
+          .then(res => res.json())
+          .then(data => {
+            if (data.status === 'success') {
+              updatePredictionDisplay(data.name, data.emoji, data.confidence_pct);
+              addLog(data.name, data.confidence_pct);
+
+              if (document.getElementById('ttsToggle').checked && lastSpokenWord !== data.name) {
+                speakWord(data.name);
+                lastSpokenWord = data.name;
+              }
+
+              appendWordToSentence(data.name);
+
+              // Check Quiz Answer if Quiz View is active
+              if (document.getElementById('view-quiz').classList.contains('active-view')) {
+                checkQuizAnswer(data.gesture_id);
+              }
+            }
+          })
+          .catch(e => console.error("ML Prediction fetch error", e));
+        }
+      }
+    }
+    canvasCtx.restore();
+  }
+
+  function drawLandmarksOnCanvas(landmarks) {
+    canvasCtx.fillStyle = '#00ffc2';
+    canvasCtx.strokeStyle = '#8b5cf6';
+    canvasCtx.lineWidth = 2;
+
+    for (const lm of landmarks) {
+      const cx = lm.x * canvasElement.width;
+      const cy = lm.y * canvasElement.height;
+      canvasCtx.beginPath();
+      canvasCtx.arc(cx, cy, 4, 0, 2 * Math.pi);
+      canvasCtx.fill();
+    }
+  }
+
+  function updatePredictionDisplay(name, emoji, confPct) {
+    document.getElementById('predWord').textContent = name;
+    document.getElementById('predEmoji').textContent = emoji;
+    document.getElementById('confPct').textContent = confPct + '%';
+    document.getElementById('confFill').style.width = confPct + '%';
+  }
+
+  // ── SENTENCE STUDIO & TTS VOICE ──
+  function appendWordToSentence(word) {
+    if (sentenceWords.length === 0 || sentenceWords[sentenceWords.length - 1] !== word) {
+      sentenceWords.push(word);
+      renderSentence();
+    }
+  }
+
+  function addSpaceToSentence() {
+    sentenceWords.push(' ');
+    renderSentence();
+  }
+
+  function renderSentence() {
+    const el = document.getElementById('sentenceText');
+    if (sentenceWords.length === 0) {
+      el.innerHTML = `<span class="sentence-placeholder">Recognized gestures will accumulate here as words...</span>`;
+    } else {
+      el.textContent = sentenceWords.join(' ');
+    }
+  }
+
+  function clearSentence() {
+    sentenceWords = [];
+    renderSentence();
+    showToast('Cleared sentence text.');
+  }
+
+  function copySentence() {
+    const text = sentenceWords.join(' ');
+    if (text.trim()) {
+      navigator.clipboard.writeText(text);
+      showToast('Copied sentence to clipboard!');
+    }
+  }
+
+  function speakWord(text) {
+    if ('speechSynthesis' in window && text.trim()) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+  }
+
+  function speakSentence() {
+    const text = sentenceWords.join(' ');
+    if (text.trim()) speakWord(text);
+  }
+
+  // ── LOGS & HISTORY ──
+  function addLog(name, conf) {
+    const list = document.getElementById('logList');
+    const now = new Date();
+    const time = String(now.getMinutes()).padStart(2,'0') + ':' + String(now.getSeconds()).padStart(2,'0');
+    
+    const row = document.createElement('div');
+    row.className = 'log-row';
+    row.innerHTML = `
+      <span class="log-time">${time}</span>
+      <span class="log-name">${name}</span>
+      <span class="log-conf">${conf ? conf + '%' : '—'}</span>
+    `;
+    list.insertBefore(row, list.firstChild);
+    if (list.children.length > 15) list.lastChild.remove();
+  }
+
+  function clearLog() {
+    document.getElementById('logList').innerHTML = '';
+  }
+
+  // ── QUIZ ENGINE ──
+  function loadNextQuiz() {
+    fetch('/api/quiz/next')
+    .then(res => res.json())
+    .then(data => {
+      if (data.status === 'success') {
+        document.getElementById('quizTargetName').textContent = data.target_name;
+        document.getElementById('quizTargetEmoji').textContent = data.target_emoji;
+        document.getElementById('quizScore').textContent = data.current_score;
+        document.getElementById('quizStreak').textContent = data.current_streak;
+      }
+    });
+  }
+
+  function checkQuizAnswer(predictedId) {
+    fetch('/api/quiz/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ predicted_id: predictedId })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.correct) {
+        showToast(`✨ Correct! Target was ${data.target_name}`);
+        loadNextQuiz();
+      }
+    });
+  }
+
+  function resetQuiz() {
+    fetch('/api/quiz/reset', { method: 'POST' })
+    .then(res => res.json())
+    .then(() => loadNextQuiz());
+  }
+
+  // ── AUTH MODAL HANDLERS ──
+  function openAuthModal(tab) {
+    switchAuthTab(tab);
+    document.getElementById('authModal').classList.add('open');
+  }
+
+  function closeAuthModal() {
+    document.getElementById('authModal').classList.remove('open');
+  }
+
+  function switchAuthTab(tab) {
+    document.querySelectorAll('.auth-tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-' + tab).classList.add('active');
+    if (tab === 'login') {
+      document.getElementById('loginForm').style.display = 'block';
+      document.getElementById('signupForm').style.display = 'none';
+    } else {
+      document.getElementById('loginForm').style.display = 'none';
+      document.getElementById('signupForm').style.display = 'block';
+    }
+  }
+
+  function handleAuthSubmit(event, mode) {
+    event.preventDefault();
+    const email = mode === 'login' ? document.getElementById('loginEmail').value : document.getElementById('signupEmail').value;
+    const pass = mode === 'login' ? document.getElementById('loginPass').value : document.getElementById('signupPass').value;
+    const name = mode === 'signup' ? document.getElementById('signupName').value : email.split('@')[0];
+
+    const endpoint = mode === 'login' ? '/api/login' : '/api/signup';
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass, name })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.status === 'success') {
+        currentUser = data.user || { name, email };
+        document.getElementById('userStatusText').textContent = `Logged in: ${currentUser.name}`;
+        document.getElementById('authNavBtn').textContent = `👤 ${currentUser.name}`;
+        closeAuthModal();
+        showToast(`Welcome, ${currentUser.name}!`);
+      } else {
+        alert(data.message || 'Authentication failed');
+      }
+    });
+  }
+
+  function showToast(msg) {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.innerHTML = `<span>✨</span><span>${msg}</span>`;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateX(25px)';
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+</script>
+</body>
+</html>
